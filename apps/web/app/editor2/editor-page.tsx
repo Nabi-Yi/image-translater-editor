@@ -475,8 +475,8 @@ export default function EditorPage2() {
       const active = canvas.getActiveObject() as any;
       const overlay = overlaysRef.current[selectedItemId];
       if (active && overlay) {
-        const left = Math.round((active.left ?? 0) - padding * 10);
-        const top = Math.round((active.top ?? 0) - padding * 10);
+        const left = Math.round((active.left ?? 0) - padding * 4);
+        const top = Math.round((active.top ?? 0) - padding * 4);
         const width = Math.round((active as any).getScaledWidth?.() ?? active.width ?? 0);
         const height = Math.round((active as any).getScaledHeight?.() ?? (active as any).height ?? 0);
         overlay.clipPath = new Rect({
