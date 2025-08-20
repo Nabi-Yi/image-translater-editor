@@ -234,7 +234,7 @@ export default function EditorPage2() {
           top: it.bbox.y,
           width: it.bbox.width || 0,
           fontSize: it.fontSize || Math.round(it.bbox.height / 2),
-          height: it.bbox.height || 0,
+          // height: it.bbox.height || 0,
           fill: it.color || "#FFF",
           editable: true,
           backgroundColor: "rgba(255,255,255,0)",
@@ -276,24 +276,7 @@ export default function EditorPage2() {
         };
 
         textbox.on("changed", () => {
-          const itemId = (textbox as any).itemId as string;
-          const newLeft = textbox.left ?? 0;
-          const newTop = textbox.top ?? 0;
-          const scaledWidth = (textbox as any).getScaledWidth?.() ?? textbox.width ?? 0;
-          // const scaledHeight = (textbox as any).getScaledHeight?.() ?? (textbox as any).height ?? 0;
-          // const scaledWidth = it.bbox.width;
-          const scaledHeight = it.bbox.height;
-          updateItem(activeImageId as string, itemId, (prev) => ({
-            ...prev,
-            translated: textbox.text || "",
-            bbox: {
-              x: Math.round(newLeft),
-              y: Math.round(newTop),
-              width: Math.round(scaledWidth || prev.bbox.width),
-              height: Math.round(scaledHeight || prev.bbox.height),
-            },
-            angle: Math.round((textbox as any).angle ?? prev.angle ?? 0),
-          }));
+          // 입력 중에는 전역 상태를 갱신하지 않고, 오버레이와 캔버스만 동기화하여 포커스를 유지한다
           syncOverlay();
           canvas.requestRenderAll();
         });
@@ -362,7 +345,7 @@ export default function EditorPage2() {
       // leave blurred overlay below text boxes
       canvas.requestRenderAll();
     })();
-  }, [activeItems, activeImageId, isCanvasReady, selectedItemId]);
+  }, [activeItems, activeImageId, isCanvasReady]);
 
   // Delete selected textbox with Delete/Backspace keys
   React.useEffect(() => {
