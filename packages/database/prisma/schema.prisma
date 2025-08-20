@@ -1,0 +1,43 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../generated/client"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  DISTRIBUTOR
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+// 사용자 관련 모델
+model User {
+  id               String     @id @default(cuid())
+  email            String     @unique
+  password         String // 해시된 비밀번호
+  name             String?
+  role             UserRole   @default(USER)
+  status           UserStatus @default(ACTIVE)
+  twoFactorEnabled Boolean    @default(false)
+  twoFactorSecret  String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  lastLoginAt      DateTime?
+  ipAddress        String?
+
+  @@index([email])
+}

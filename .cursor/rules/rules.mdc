@@ -1,0 +1,134 @@
+---
+alwaysApply: true
+---
+
+## 프로젝트 정의
+
+- Framework : nextjs 15.2.2, typescript
+- Package Manager: pnpm
+- ORM : prisma
+- Libraries : @tanstack/react-query, tailwindcss, shadcn, zustand, zod, @tanstack/react-table, clsx, tailwind-merge, dayjs, xlsx, react-icons
+
+## 프로젝트 구조
+
+프로젝트는 다음과 같은 구조를 따릅니다:
+
+- apps/web: 사용자단 어플리케이션
+- apps/distributor: 총판 및 관리자 어플리케이션
+- packages/database: 데이터베이스 정의
+- packages/ui: shadcn 컴포넌트
+- packages/utils: 공용 유틸 함수
+
+각 폴더의 역할은 다음과 같습니다:
+
+- app/: 라우팅, 레이아웃, CSS 및 페이지 표시 컴포넌트만 포함
+- app/api : api 함수 포함
+- components/: 재사용 가능한 UI 컴포넌트와 페이지별 컴포넌트 포함
+- lib/: 유틸리티 및 헬퍼 함수, API 관련 로직 포함
+- hooks/: 재사용 가능한 로직을 포함하는 커스텀 React 훅 포함
+- consts/ : 사이트에 필요한 정적 변수들을 포함
+- types/ : 타입과 스키마 정의 및 인터페이스 포함
+
+이 구조는 다음과 같은 이점을 제공합니다:
+
+- 조직적 명확성: 잘 정의된 구조로 프로젝트 탐색과 이해가 용이
+- 모듈성과 재사용성: 관심사 분리를 통한 코드 재사용 촉진
+- 확장성: 새로운 기능 추가 시 코드베이스가 복잡해지지 않도록 지원
+- 유지보수성: 책임 분리를 통해 코드 유지보수와 리팩토링이 용이
+- 협업: 팀 간 협업을 촉진하고 새로운 개발자의 온보딩을 지원
+
+## 성능 최적화 규칙
+
+### 렌더링 전략
+
+- 가능한 정적 생성(SSG)을 활용합니다
+- 동적 데이터가 필요한 경우 서버 사이드 렌더링(SSR)을 사용합니다
+- ISR로 데이터 갱신을 최적화합니다
+- 부분 프리렌더링으로 정적/동적 콘텐츠를 결합합니다
+- 관리자 페이지의 경우 CSR을 우선적으로 적용합니다
+
+### 이미지 최적화
+
+- 가능한 경우 next/image 컴포넌트를 사용하여 자동 최적화를 활용합니다
+- 적절한 이미지 크기와 포맷을 사용합니다
+- 레이지 로딩을 활용하여 초기 로드 시간을 개선합니다
+- placeholder나 blur 효과로 사용자 경험을 향상시킵니다
+- 가능한 react-icons, lucide-react의 아이콘을 사용합니다.
+
+### 코드 분할
+
+- 동적 임포트로 필요한 코드만 로드합니다
+- 라우트 그룹으로 도메인별 코드 분할을 구현합니다
+- Suspense 경계로 점진적 로딩을 구현합니다
+- 병렬 라우트로 페이지 섹션의 독립적 로딩을 구현합니다
+
+### 캐싱과 재검증
+
+- 캐시 제어로 성능을 최적화합니다
+- CSR의 경우 적절한 loading component, skeleton, placeholder 등으로 사용자 경험을 최적화합니다.
+- 적절한 재검증 주기를 설정합니다
+- 요청 중복 제거를 활용합니다
+- CDN 통합으로 전역 성능을 개선합니다
+
+## 프론트엔드 고려사항
+
+### UX 원칙
+
+- 직관적 내비게이션
+- 명확한 정보 계층
+- 즉각적 피드백
+- 접근성 고려
+- 최적화된 성능
+
+### 반응형 디자인
+
+- Fluid Grid System
+- 유연한 이미지/미디어
+- 모바일 우선 접근
+- 터치 친화적 UI
+- 콘텐츠 재배치 최적화
+
+## 코딩 스타일
+
+### 1. 타입스크립트 사용 규칙
+
+- 모든 props에 타입을 정의합니다
+- any 타입 사용을 지양합니다
+- 인터페이스나 타입은 컴포넌트 이름과 연관되게 작성합니다
+- 공통 타입은 types 폴더에서 관리합니다
+
+```tsx
+interface ButtonProps {
+  onClick: () => void;
+  children: React.ReactNode;
+  variant?: "primary" | "secondary";
+}
+
+const Button: React.FC<ButtonProps> = ({ onClick, children, variant = "primary" }) => {
+  return (
+    <button onClick={onClick} className={variant}>
+      {children}
+    </button>
+  );
+};
+```
+
+### 2. 함수 작성 규칙
+
+- 함수형 컴포넌트를 사용합니다
+- 커스텀 훅은 use 접두사를 사용합니다
+- 함수는 한 가지 작업만 수행하도록 작성합니다
+- 긴 매개변수 리스트는 객체로 전달합니다
+
+```tsx
+// 좋은 예시
+function handleSubmit (event: React.FormEvent) {
+  event.preventDefault();
+  // 처리 로직
+};
+
+// 커스텀 훅 예시
+function useWindowSize {
+  // 훅 로직
+};
+```
