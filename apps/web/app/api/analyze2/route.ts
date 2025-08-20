@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
         textToTranslate.map((t) => `${t.id}: ${t.original}`).join("\n"),
         "Task:",
         "1) Detect ALL visible text in the provided image.",
-        "2) Provide its **Korean translation**",
+        "2) This Image is about some selling product on website. Provide its **Korean translation** with the whole context of the text.",
         "3) For each detected text box, ESTIMATE the color of the text in hex format (e.g., #000000). If uncertain, provide your best estimate",
         "4) match with the provided text id and return the translated text and color",
         "6) Return STRICT JSON with this schema (no extra text):",
