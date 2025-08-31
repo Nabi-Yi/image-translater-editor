@@ -4,6 +4,7 @@ import React from "react";
 import { useEditorStore } from "@/hooks/useEditorStore";
 import type { EditorImage, TextItem } from "@/types/editor";
 import { Canvas, FabricImage, Rect, Textbox, filters } from "fabric";
+import { createAndDownloadMask } from "./create-mask";
 
 type AnalyzeImageInput = {
   images: Array<{
@@ -29,6 +30,8 @@ type AnalyzeImagesResponse = {
   data: {
     results: Array<{
       imageId: string;
+      width: number;
+      height: number;
       boxes: AnalyzeImageResultBox[];
     }>;
   } | null;
@@ -407,7 +410,7 @@ export default function EditorPage2() {
       });
       const json: AnalyzeImagesResponse = await res.json();
       if (json.status !== "success" || !json.data) throw new Error(json.message || "analysis_failed");
-
+      console.log(json.data.results);
       json.data.results.forEach((r) => {
         const items: TextItem[] = r.boxes.map((b) => ({
           id: b.id,
@@ -422,6 +425,12 @@ export default function EditorPage2() {
         }));
         console.log(items);
         setItemsForImage(r.imageId, items);
+
+        // 마스킹 파일을 생성하고 다운로드하는 부분
+        const bboxes = r.boxes.map((b) => b.bbox);
+        if (activeImage) {
+          createAndDownloadMask(activeImage.width, activeImage.height, bboxes, `mask_${r.imageId}.png`);
+        }
       });
     } catch (e: any) {
       console.error(e);
