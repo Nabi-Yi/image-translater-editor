@@ -12,6 +12,7 @@ export type EditorState = {
   setItemsForImage: (id: string, items: TextItem[]) => void;
   updateItem: (imageId: string, itemId: string, updater: (prev: TextItem) => TextItem) => void;
   removeItem: (imageId: string, itemId: string) => void;
+  updateImage: (imageId: string, imageSrc: string) => void;
 };
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -32,5 +33,13 @@ export const useEditorStore = create<EditorState>((set) => ({
       const list = state.itemsByImageId[imageId] || [];
       const next = list.filter((it) => it.id !== itemId);
       return { itemsByImageId: { ...state.itemsByImageId, [imageId]: next } };
+    }),
+  updateImage: (imageId, imageSrc) =>
+    set((state) => {
+      const withCacheBust = imageSrc.startsWith("data:")
+        ? imageSrc
+        : `${imageSrc}${imageSrc.includes("?") ? "&" : "?"}v=${Date.now()}`;
+      const next = state.images.map((img) => (img.id === imageId ? { ...img, dataUrl: withCacheBust } : img));
+      return { images: next };
     }),
 }));

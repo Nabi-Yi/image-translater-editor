@@ -4,12 +4,16 @@ import React from "react";
 import { useEditorStore } from "@/hooks/useEditorStore";
 import type { EditorImage, TextItem } from "@/types/editor";
 import { Canvas, FabricImage, Rect, Textbox, filters } from "fabric";
+import { createAndDownloadMask } from "./create-mask";
+import { imageResizer } from "../../../../packages/utils/src/imageResizer";
 
 type AnalyzeImageInput = {
   images: Array<{
     mimeType: string;
     dataBase64: string;
     id: string;
+    width: number;
+    height: number;
   }>;
   model?: string;
 };
@@ -29,7 +33,11 @@ type AnalyzeImagesResponse = {
   data: {
     results: Array<{
       imageId: string;
+      width: number;
+      height: number;
       boxes: AnalyzeImageResultBox[];
+      maskImage: string;
+      inpaintedImage: string;
     }>;
   } | null;
 };
@@ -58,10 +66,18 @@ export default function EditorPage2() {
   const fabricCanvasRef = React.useRef<any>(null);
   const baseImageRef = React.useRef<any>(null);
   const rebuildingRef = React.useRef<boolean>(false);
-  const overlaysRef = React.useRef<Record<string, any>>({});
 
-  const { images, activeImageId, itemsByImageId, setImages, setActiveImage, setItemsForImage, updateItem, removeItem } =
-    useEditorStore();
+  const {
+    images,
+    activeImageId,
+    itemsByImageId,
+    setImages,
+    setActiveImage,
+    setItemsForImage,
+    updateItem,
+    removeItem,
+    updateImage,
+  } = useEditorStore();
 
   const [selectedModel, setSelectedModel] = React.useState<string>("gemini-2.5-flash");
   const [isTranslating, setIsTranslating] = React.useState<boolean>(false);
@@ -112,7 +128,14 @@ export default function EditorPage2() {
     const nextImages: EditorImage[] = [];
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
-      const dataUrl = await readFileAsDataUrl(file);
+      // const dataUrl = await  readFileAsDataUrl(file);
+      const resizedFile = await imageResizer(file, {
+        maxWidth: 1280,
+        maxHeight: 9999,
+        quality: 95,
+        compressFormat: "JPEG",
+      });
+      const dataUrl = await readFileAsDataUrl(resizedFile);
       const size = await getImageNaturalSize(dataUrl);
       nextImages.push({
         id: crypto.randomUUID(),
@@ -130,222 +153,170 @@ export default function EditorPage2() {
     e.target.value = "";
   };
 
-  // Initialize fabric canvas when active image changes
-  React.useEffect(() => {
-    let isCancelled = false;
-    (async () => {
-      if (!canvasElRef.current) return;
+  async function initCanvas() {
+    if (!canvasElRef.current) return;
 
-      setIsCanvasReady(false);
+    setIsCanvasReady(false);
 
-      // Dispose previous
-      if (fabricCanvasRef.current) {
-        fabricCanvasRef.current.dispose();
-        fabricCanvasRef.current = null;
-        baseImageRef.current = null;
-        overlaysRef.current = {};
+    // Dispose previous
+    if (fabricCanvasRef.current) {
+      fabricCanvasRef.current.dispose();
+      fabricCanvasRef.current = null;
+      baseImageRef.current = null;
+      setSelectedItemId(null);
+    }
+
+    const canvas = new Canvas(canvasElRef.current, {
+      selection: false,
+      preserveObjectStacking: true,
+    });
+    fabricCanvasRef.current = canvas;
+
+    // Register selection listeners
+    const onSelectionChange = () => {
+      if (rebuildingRef.current) return;
+      const active = canvas.getActiveObject() as any;
+      if (!active || active === baseImageRef.current) {
         setSelectedItemId(null);
+      } else {
+        setSelectedItemId(active.itemId ?? null);
       }
-
-      const canvas = new Canvas(canvasElRef.current, {
-        selection: false,
-        preserveObjectStacking: true,
-      });
-      fabricCanvasRef.current = canvas;
-
-      // Register selection listeners
-      const onSelectionChange = () => {
-        if (rebuildingRef.current) return;
-        const active = canvas.getActiveObject() as any;
-        if (!active || active === baseImageRef.current) {
-          setSelectedItemId(null);
-        } else {
-          setSelectedItemId(active.itemId ?? null);
-        }
-      };
-      const onSelectionCleared = () => {
-        if (rebuildingRef.current) return;
-        setSelectedItemId(null);
-      };
-      canvas.on("selection:created", onSelectionChange);
-      canvas.on("selection:updated", onSelectionChange);
-      canvas.on("selection:cleared", onSelectionCleared);
-
-      if (!activeImage) return;
-
-      // Load base image
-      const baseImg = await FabricImage.fromURL(activeImage.dataUrl, { crossOrigin: "anonymous" });
-      if (isCancelled || !baseImg) return;
-      canvas.setWidth(activeImage.width || baseImg.getScaledWidth());
-      canvas.setHeight(activeImage.height || baseImg.getScaledHeight());
-      baseImg.set({ selectable: false, evented: false, left: 0, top: 0, originX: "left", originY: "top" });
-      baseImageRef.current = baseImg;
-      canvas.add(baseImg);
-
-      // Previously: single blurred overlay image with union clip. Removed in favor of per-item overlays.
-
-      canvas.renderAll();
-      setIsCanvasReady(true);
-    })();
-    return () => {
-      isCancelled = true;
     };
-  }, [activeImage?.id]);
+    const onSelectionCleared = () => {
+      if (rebuildingRef.current) return;
+      setSelectedItemId(null);
+    };
+    canvas.on("selection:created", onSelectionChange);
+    canvas.on("selection:updated", onSelectionChange);
+    canvas.on("selection:cleared", onSelectionCleared);
+
+    if (!activeImage) return;
+
+    // Load base image
+    const baseImg = await FabricImage.fromURL(activeImage.dataUrl, { crossOrigin: "anonymous" });
+    if (!baseImg) return;
+    canvas.setWidth(activeImage.width || baseImg.getScaledWidth());
+    canvas.setHeight(activeImage.height || baseImg.getScaledHeight());
+    baseImg.set({ selectable: false, evented: false, left: 0, top: 0, originX: "left", originY: "top" });
+    baseImageRef.current = baseImg;
+    canvas.add(baseImg);
+
+    // Previously: single blurred overlay image with union clip. Removed in favor of per-item overlays.
+
+    canvas.renderAll();
+    setIsCanvasReady(true);
+  }
 
   // Render items (text boxes + blur clips) whenever items change
-  React.useEffect(() => {
-    (async () => {
-      const canvas = fabricCanvasRef.current as import("fabric").Canvas | null;
-      if (!canvas || !isCanvasReady) return;
+  async function renderCanvas() {
+    const canvas = fabricCanvasRef.current as import("fabric").Canvas | null;
+    if (!canvas || !isCanvasReady) return;
 
-      rebuildingRef.current = true;
+    rebuildingRef.current = true;
 
-      // Remove previous text objects (keep images)
-      const toRemove = canvas.getObjects().filter((o: any) => o !== baseImageRef.current);
-      toRemove.forEach((o: any) => canvas.remove(o));
+    // Remove previous text objects (keep images)
+    const toRemove = canvas.getObjects().filter((o: any) => o !== baseImageRef.current);
+    toRemove.forEach((o: any) => canvas.remove(o));
+    // Add text boxes and per-item blur overlays
+    for (const it of activeItems) {
+      if (it.visible === false) continue;
+      const padding = Math.max(0, Math.round(it.padding ?? 8));
+      const overlay = await baseImageRef.current.clone();
+      overlay.set({ selectable: false, evented: false, left: 0, top: 0, originX: "left", originY: "top" });
 
-      // Add text boxes and per-item blur overlays
-      overlaysRef.current = {};
-      for (const it of activeItems) {
-        if (it.visible === false) continue;
-        const padding = Math.max(0, Math.round(it.padding ?? 8));
-        const overlay = await baseImageRef.current.clone();
-        overlay.set({ selectable: false, evented: false, left: 0, top: 0, originX: "left", originY: "top" });
-        const BlurFilter = (filters as any)?.Blur;
-        if (BlurFilter) {
-          overlay.filters = [new BlurFilter({ blur: Math.min(1, Math.max(0.01, (it.blur ?? 16) / 30)) })];
-          overlay.applyFilters();
-        }
-        overlay.clipPath = new Rect({
-          left: it.bbox.x - padding,
-          top: it.bbox.y - padding,
-          width: it.bbox.width + padding * 2,
-          height: it.bbox.height + padding * 2,
-          absolutePositioned: true,
-          originX: "left",
-          originY: "top",
-          angle: it.angle || 0,
-        }) as any;
-        overlaysRef.current[it.id] = overlay;
-        canvas.add(overlay);
+      const textbox = new Textbox(it.translated || "", {
+        left: it.bbox.x,
+        top: it.bbox.y,
+        width: Math.round(it.bbox.width * 2),
+        fontSize: it.fontSize || Math.round(it.bbox.height * 0.8),
+        fill: it.color || "#FFF",
+        editable: true,
+        originX: "left",
+        originY: "top",
+        angle: it.angle || 0,
+        textAlign: "left",
+        strokeUniform: true,
+        strokeWidth: 1,
+        strokeStyle: "solid",
+        strokeDashArray: [],
+        strokeLineCap: "butt",
+        strokeLineJoin: "miter",
+        strokeMiterLimit: 10,
+        stroke: it.color || "#333333",
+      });
+      (textbox as any).itemId = it.id;
+      textbox.set({ lockScalingY: true, lockRotation: false });
 
-        const textbox = new Textbox(it.translated || "", {
-          left: it.bbox.x,
-          top: it.bbox.y,
-          width: it.bbox.width || 0,
-          fontSize: it.fontSize || Math.round(it.bbox.height / 2),
-          // height: it.bbox.height || 0,
-          fill: it.color || "#FFF",
-          editable: true,
-          backgroundColor: "rgba(255,255,255,0)",
-          borderColor: "#4f46e5",
-          cornerColor: "#4f46e5",
-          cornerStyle: "circle",
-          transparentCorners: false,
-          padding: 0,
-          originX: "left",
-          originY: "top",
-          angle: it.angle || 0,
-          textAlign: "center",
-        });
-        (textbox as any).itemId = it.id;
-        textbox.set({ lockScalingY: true, lockRotation: false });
+      textbox.on("changed", () => {
+        // 입력 중에는 전역 상태를 갱신하지 않고, 오버레이와 캔버스만 동기화하여 포커스를 유지한다
+        // syncOverlay();
+        canvas.requestRenderAll();
+      });
 
-        const syncOverlay = () => {
-          const itemId = (textbox as any).itemId as string;
-          const ov = overlaysRef.current[itemId];
-          if (!ov) return;
-          const currentPadding = Math.max(0, Math.round(activeItems.find((x) => x.id === itemId)?.padding ?? 8));
-          const left = Math.round(textbox.left ?? it.bbox.x);
-          const top = Math.round(textbox.top ?? it.bbox.y);
-          const width = Math.round((textbox as any).getScaledWidth?.() ?? textbox.width ?? it.bbox.width);
-          // const height = Math.round((textbox as any).getScaledHeight?.() ?? (textbox as any).height ?? it.bbox.height);
-          // const width = it.bbox.width;
-          const height = it.bbox.height;
-          ov.clipPath = new Rect({
-            left: left - currentPadding * 4,
-            top: top - currentPadding * 4,
-            width: width + currentPadding * 2,
-            height: height + currentPadding * 2,
-            absolutePositioned: true,
-            originX: "left",
-            originY: "top",
-            angle: (textbox as any).angle || 0,
-          }) as any;
-          ov.dirty = true;
-        };
+      textbox.on("editing:exited", () => {
+        const itemId = (textbox as any).itemId as string;
+        const newLeft = textbox.left ?? 0;
+        const newTop = textbox.top ?? 0;
+        const scaledWidth = (textbox as any).getScaledWidth?.() ?? textbox.width ?? 0;
+        // const scaledHeight = (textbox as any).getScaledHeight?.() ?? (textbox as any).height ?? 0;
+        // const scaledWidth = it.bbox.width;
+        const scaledHeight = it.bbox.height;
+        updateItem(activeImageId as string, itemId, (prev) => ({
+          ...prev,
+          translated: textbox.text || "",
+          bbox: {
+            x: Math.round(newLeft),
+            y: Math.round(newTop),
+            width: Math.round(scaledWidth || prev.bbox.width),
+            height: Math.round(scaledHeight || prev.bbox.height),
+          },
+          angle: Math.round((textbox as any).angle ?? prev.angle ?? 0),
+        }));
+        // syncOverlay();
+        canvas.requestRenderAll();
+      });
 
-        textbox.on("changed", () => {
-          // 입력 중에는 전역 상태를 갱신하지 않고, 오버레이와 캔버스만 동기화하여 포커스를 유지한다
-          syncOverlay();
-          canvas.requestRenderAll();
-        });
+      textbox.on("modified", () => {
+        const itemId = (textbox as any).itemId as string;
+        const newLeft = textbox.left ?? 0;
+        const newTop = textbox.top ?? 0;
+        const scaledWidth = (textbox as any).getScaledWidth?.() ?? textbox.width ?? it.bbox.width;
+        // const scaledHeight = (textbox as any).getScaledHeight?.() ?? (textbox as any).height ?? it.bbox.height;
+        // const scaledWidth = it.bbox.width;
+        const scaledHeight = it.bbox.height;
+        const newAngle = (textbox as any).angle ?? 0;
+        textbox.set({ scaleX: 1, width: scaledWidth, scaleY: 1 });
+        updateItem(activeImageId as string, itemId, (prev) => ({
+          ...prev,
+          bbox: {
+            x: Math.round(newLeft),
+            y: Math.round(newTop),
+            width: Math.round(scaledWidth),
+            height: Math.round(scaledHeight),
+          },
+          angle: Math.round(newAngle),
+        }));
+        // syncOverlay();
+        canvas.requestRenderAll();
+      });
 
-        textbox.on("editing:exited", () => {
-          const itemId = (textbox as any).itemId as string;
-          const newLeft = textbox.left ?? 0;
-          const newTop = textbox.top ?? 0;
-          const scaledWidth = (textbox as any).getScaledWidth?.() ?? textbox.width ?? 0;
-          // const scaledHeight = (textbox as any).getScaledHeight?.() ?? (textbox as any).height ?? 0;
-          // const scaledWidth = it.bbox.width;
-          const scaledHeight = it.bbox.height;
-          updateItem(activeImageId as string, itemId, (prev) => ({
-            ...prev,
-            translated: textbox.text || "",
-            bbox: {
-              x: Math.round(newLeft),
-              y: Math.round(newTop),
-              width: Math.round(scaledWidth || prev.bbox.width),
-              height: Math.round(scaledHeight || prev.bbox.height),
-            },
-            angle: Math.round((textbox as any).angle ?? prev.angle ?? 0),
-          }));
-          syncOverlay();
-          canvas.requestRenderAll();
-        });
+      canvas.add(textbox);
+      moveToFront(canvas, textbox);
+    }
 
-        textbox.on("modified", () => {
-          const itemId = (textbox as any).itemId as string;
-          const newLeft = textbox.left ?? 0;
-          const newTop = textbox.top ?? 0;
-          const scaledWidth = (textbox as any).getScaledWidth?.() ?? textbox.width ?? it.bbox.width;
-          // const scaledHeight = (textbox as any).getScaledHeight?.() ?? (textbox as any).height ?? it.bbox.height;
-          // const scaledWidth = it.bbox.width;
-          const scaledHeight = it.bbox.height;
-          const newAngle = (textbox as any).angle ?? 0;
-          textbox.set({ scaleX: 1, width: scaledWidth, scaleY: 1 });
-          updateItem(activeImageId as string, itemId, (prev) => ({
-            ...prev,
-            bbox: {
-              x: Math.round(newLeft),
-              y: Math.round(newTop),
-              width: Math.round(scaledWidth),
-              height: Math.round(scaledHeight),
-            },
-            angle: Math.round(newAngle),
-          }));
-          syncOverlay();
-          canvas.requestRenderAll();
-        });
-
-        canvas.add(textbox);
-        moveToFront(canvas, textbox);
+    // Reselect previously selected textbox to keep focus and selection stable
+    if (selectedItemId) {
+      const objs = canvas.getObjects();
+      const target = objs.find((o: any) => (o as any).itemId === selectedItemId);
+      if (target) {
+        canvas.setActiveObject(target as any);
       }
+    }
 
-      // Reselect previously selected textbox to keep focus and selection stable
-      if (selectedItemId) {
-        const objs = canvas.getObjects();
-        const target = objs.find((o: any) => (o as any).itemId === selectedItemId);
-        if (target) {
-          canvas.setActiveObject(target as any);
-        }
-      }
-
-      rebuildingRef.current = false;
-      // leave blurred overlay below text boxes
-      canvas.requestRenderAll();
-    })();
-  }, [activeItems, activeImageId, isCanvasReady]);
+    rebuildingRef.current = false;
+    // leave blurred overlay below text boxes
+    canvas.requestRenderAll();
+  }
 
   // Delete selected textbox with Delete/Backspace keys
   React.useEffect(() => {
@@ -354,8 +325,7 @@ export default function EditorPage2() {
       const canvas = fabricCanvasRef.current as import("fabric").Canvas | null;
       if (!canvas) return;
       const active = canvas.getActiveObject() as any;
-      if (!active || active === baseImageRef.current || active === overlaysRef.current[selectedItemId as string])
-        return;
+      if (!active || active === baseImageRef.current) return;
       // Avoid deleting while editing text
       if (typeof (active as any).isEditing === "boolean" && (active as any).isEditing) return;
       const itemId = (active as any).itemId as string | undefined;
@@ -376,7 +346,7 @@ export default function EditorPage2() {
     const canvas = fabricCanvasRef.current as import("fabric").Canvas | null;
     if (!canvas || !activeImageId) return;
     const active = canvas.getActiveObject() as any;
-    if (!active || active === baseImageRef.current || active === overlaysRef.current[selectedItemId as string]) return;
+    if (!active || active === baseImageRef.current) return;
     // Avoid deleting while editing text
     if (typeof (active as any).isEditing === "boolean" && (active as any).isEditing) return;
     const itemId = (active as any).itemId as string | undefined;
@@ -396,6 +366,8 @@ export default function EditorPage2() {
           id: img.id,
           mimeType: img.mimeType,
           dataBase64: img.dataUrl.split(",")[1] || "",
+          width: img.width as number,
+          height: img.height as number,
         })),
         model: selectedModel,
       };
@@ -407,7 +379,7 @@ export default function EditorPage2() {
       });
       const json: AnalyzeImagesResponse = await res.json();
       if (json.status !== "success" || !json.data) throw new Error(json.message || "analysis_failed");
-
+      console.log(json.data.results);
       json.data.results.forEach((r) => {
         const items: TextItem[] = r.boxes.map((b) => ({
           id: b.id,
@@ -421,7 +393,14 @@ export default function EditorPage2() {
           color: b.color || "#111111",
         }));
         console.log(items);
+        updateImage(r.imageId, r.inpaintedImage);
         setItemsForImage(r.imageId, items);
+
+        // 마스킹 파일을 생성하고 다운로드하는 부분
+        // const bboxes = r.boxes.map((b) => b.bbox);
+        // if (activeImage) {
+        //   createAndDownloadMask(activeImage.width, activeImage.height, bboxes, `mask_${r.imageId}.png`);
+        // }
       });
     } catch (e: any) {
       console.error(e);
@@ -463,56 +442,18 @@ export default function EditorPage2() {
     updateItem(activeImageId, selectedItemId, (prev) => ({ ...prev, fontSize }));
   };
 
-  const handlePaddingChange = (value: number): void => {
-    if (!activeImageId || !selectedItemId) return;
-    const padding = Math.max(0, Math.round(value || 0));
-    updateItem(activeImageId, selectedItemId, (prev) => ({
-      ...prev,
-      padding,
-    }));
-    const canvas = fabricCanvasRef.current as Canvas | null;
-    if (canvas) {
-      const active = canvas.getActiveObject() as any;
-      const overlay = overlaysRef.current[selectedItemId];
-      if (active && overlay) {
-        const left = Math.round((active.left ?? 0) - padding * 4);
-        const top = Math.round((active.top ?? 0) - padding * 4);
-        const width = Math.round((active as any).getScaledWidth?.() ?? active.width ?? 0);
-        const height = Math.round((active as any).getScaledHeight?.() ?? (active as any).height ?? 0);
-        overlay.clipPath = new Rect({
-          left: left - padding,
-          top: top - padding,
-          width: width + padding * 2,
-          height: height + padding * 2,
-          absolutePositioned: true,
-          originX: "left",
-          originY: "top",
-          angle: (active as any).angle || 0,
-        }) as any;
-        overlay.dirty = true;
-        canvas.requestRenderAll();
-      }
-    }
-  };
+  // 활성 이미지 ID 또는 이미지 데이터가 바뀌면 캔버스 재초기화
+  React.useEffect(() => {
+    if (!activeImage) return;
+    initCanvas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeImageId, activeImage?.dataUrl]);
 
-  const handleBlurChange = (value: number): void => {
-    if (!activeImageId || !selectedItemId) return;
-    const blur = Math.max(0, Math.round(value || 0));
-    updateItem(activeImageId, selectedItemId, (prev) => ({
-      ...prev,
-      blur,
-    }));
-    const canvas = fabricCanvasRef.current as import("fabric").Canvas | null;
-    if (canvas) {
-      const overlay = overlaysRef.current[selectedItemId];
-      const BlurFilter = (filters as any)?.Blur;
-      if (overlay && BlurFilter) {
-        overlay.filters = [new BlurFilter({ blur: Math.min(1, Math.max(0.01, blur / 30)) })];
-        overlay.applyFilters();
-        canvas.requestRenderAll();
-      }
-    }
-  };
+  // 캔버스 준비 완료되거나 아이템 변경 시 재렌더
+  React.useEffect(() => {
+    renderCanvas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCanvasReady, activeItems]);
 
   return (
     <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden">
@@ -536,7 +477,9 @@ export default function EditorPage2() {
           {images.map((img) => (
             <button
               key={img.id}
-              onClick={() => setActiveImage(img.id)}
+              onClick={() => {
+                setActiveImage(img.id);
+              }}
               className={`w-full text-left rounded border overflow-hidden ${activeImageId === img.id ? "ring-2 ring-indigo-600" : ""}`}
             >
               <div className="w-full">
@@ -584,7 +527,7 @@ export default function EditorPage2() {
               className="w-20 border rounded px-2 py-1 text-sm disabled:opacity-50"
             />
           </div>
-          <div className="flex items-center gap-1">
+          {/* <div className="flex items-center gap-1">
             <label className="text-xs text-gray-600">패딩</label>
             <input
               type="number"
@@ -595,8 +538,8 @@ export default function EditorPage2() {
               disabled={!selectedItemId}
               className="w-20 border rounded px-2 py-1 text-sm disabled:opacity-50"
             />
-          </div>
-          <div className="flex items-center gap-1">
+          </div> */}
+          {/* <div className="flex items-center gap-1">
             <label className="text-xs text-gray-600">블러 강도</label>
             <input
               type="number"
@@ -608,7 +551,7 @@ export default function EditorPage2() {
               disabled={!selectedItemId}
               className="w-24 border rounded px-2 py-1 text-sm disabled:opacity-50"
             />
-          </div>
+          </div> */}
           <button
             onClick={handleDeleteSelected}
             disabled={!selectedItemId}
