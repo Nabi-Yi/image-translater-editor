@@ -27,10 +27,10 @@ export function createAndDownloadMask(
   ctx.fillStyle = "white";
   bboxes.forEach((bbox) => {
     // x, y, width, height 형식에서 xmin, ymin, xmax, ymax 형식으로 변환
-    const xmin = bbox.x;
-    const ymin = bbox.y;
-    const width = bbox.width;
-    const height = bbox.height;
+    const xmin = bbox.x - 8;
+    const ymin = bbox.y - 8;
+    const width = bbox.width + 16;
+    const height = bbox.height + 16;
 
     // 변환된 좌표를 사용하여 사각형 그리기
     ctx.fillRect(xmin, ymin, width, height);
