@@ -298,7 +298,7 @@ function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
-export async function inpaintImage(image: { data: Buffer; id: string }, mask: { data: Buffer; id: string }) {
+async function inpaintImage(image: { data: Buffer; id: string }, mask: { data: Buffer; id: string }) {
   const imageUrl = await putImageToS3(image.data, "image/jpeg", ["imageTest", image.id]);
   console.log({ imageUrl });
   const maskUrl = await putImageToS3(mask.data, "image/jpeg", ["imageTest", mask.id]);
