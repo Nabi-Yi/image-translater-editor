@@ -20,7 +20,7 @@ type AnalyzeImageInput = {
 
 type AnalyzeImageResultBox = {
   id: string;
-  bbox: { x: number; y: number; width: number; height: number };
+  bbox: { x: number; y: number; width: number; height: number; angle: number };
   original: string;
   translated: string;
   fontSize?: number;
@@ -220,9 +220,7 @@ export default function EditorPage2() {
     // Add text boxes and per-item blur overlays
     for (const it of activeItems) {
       if (it.visible === false) continue;
-      const padding = Math.max(0, Math.round(it.padding ?? 8));
-      const overlay = await baseImageRef.current.clone();
-      overlay.set({ selectable: false, evented: false, left: 0, top: 0, originX: "left", originY: "top" });
+      console.log({ it });
 
       const textbox = new Textbox(it.translated || "", {
         left: it.bbox.x,
@@ -233,16 +231,8 @@ export default function EditorPage2() {
         editable: true,
         originX: "left",
         originY: "top",
-        angle: it.angle || 0,
+        angle: it.bbox.angle || 0,
         textAlign: "left",
-        strokeUniform: true,
-        strokeWidth: 1,
-        strokeStyle: "solid",
-        strokeDashArray: [],
-        strokeLineCap: "butt",
-        strokeLineJoin: "miter",
-        strokeMiterLimit: 10,
-        stroke: it.color || "#333333",
       });
       (textbox as any).itemId = it.id;
       textbox.set({ lockScalingY: true, lockRotation: false });
@@ -265,6 +255,7 @@ export default function EditorPage2() {
           ...prev,
           translated: textbox.text || "",
           bbox: {
+            angle: Math.round((textbox as any).angle ?? prev.bbox.angle ?? 0),
             x: Math.round(newLeft),
             y: Math.round(newTop),
             width: Math.round(scaledWidth || prev.bbox.width),
@@ -289,12 +280,12 @@ export default function EditorPage2() {
         updateItem(activeImageId as string, itemId, (prev) => ({
           ...prev,
           bbox: {
+            angle: Math.round(newAngle),
             x: Math.round(newLeft),
             y: Math.round(newTop),
             width: Math.round(scaledWidth),
             height: Math.round(scaledHeight),
           },
-          angle: Math.round(newAngle),
         }));
         // syncOverlay();
         canvas.requestRenderAll();
@@ -383,7 +374,7 @@ export default function EditorPage2() {
       json.data.results.forEach((r) => {
         const items: TextItem[] = r.boxes.map((b) => ({
           id: b.id,
-          bbox: { x: b.bbox.x, y: b.bbox.y, width: b.bbox.width, height: b.bbox.height },
+          bbox: { x: b.bbox.x, y: b.bbox.y, width: b.bbox.width, height: b.bbox.height, angle: b.bbox.angle },
           original: b.original,
           translated: b.translated,
           fontSize: b.fontSize || Math.round(b.bbox.height / 2),

@@ -40,7 +40,7 @@ const client = new vision.ImageAnnotatorClient({
 });
 const LEVEL = "paragraph";
 const INVERT = false;
-const PADDING = 4;
+const PADDING = 8;
 
 // 한자(CJK Ideographs) 포함 여부로 필터링
 const cjkRegex = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
         }
       }
       const cjkShapes = shapes.filter((s) => cjkRegex.test(s.text));
-      console.log({ cjkShapes });
+      // console.log({ cjkShapes });
       const bg = INVERT ? "#fff" : "#000";
       const fg = INVERT ? "#000" : "#fff";
 
@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
       );
       const textToTranslate: AnalyzedTextBox[] = [];
       for (const [idx, s] of cjkShapes.entries()) {
+        const angle = computePolygonAngleDegrees(s.poly);
         if (PADDING > 0) {
           // Use expanded rect (bounding box) if padding is requested
           const { x, y, w, h } = polygonToRect(s.poly);
@@ -98,6 +99,7 @@ export async function POST(req: NextRequest) {
               y: ry,
               width: rw,
               height: rh,
+              angle,
             },
             translated: "",
             color: "#333333",
@@ -119,11 +121,18 @@ export async function POST(req: NextRequest) {
               y: y,
               width: w,
               height: h,
+              angle,
             },
           });
           svgParts.push(`<polygon points="${points}" fill="${fg}"/>`);
         }
       }
+      console.log({
+        textToTranslate: textToTranslate.map((t) => ({
+          text: t.original,
+          angle: t.bbox.angle,
+        })),
+      });
       svgParts.push("</svg>");
       const svg = svgParts.join("\n");
       const buf = await sharp(Buffer.from(svg, "utf-8"))
@@ -246,24 +255,6 @@ export async function POST(req: NextRequest) {
       };
 
       results.push(result2);
-
-      // const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${API_KEY}`, {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify({
-      //     requests: [
-      //       {
-      //         image: { content: body.images[0].dataBase64 }, // 또는 { content: base64 }
-      //         features: [{ type: "TEXT_DETECTION" }],
-      //       },
-      //     ],
-      //   }),
-      // });
-      // const result = await response.json();
-      // console.log(JSON.stringify(result, null, 2));
-      // const [result] = await client.textDetection(body.images.map((image) => ({ content: image.dataBase64 })));
-      // console.log(result);
-      // return Response.json(result);
     }
     return Response.json(successServerAction("analyzed", { results }));
   } catch (e: any) {
@@ -294,15 +285,40 @@ function polygonToRect(poly: any) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+function computePolygonAngleDegrees(poly: any) {
+  if (!poly || poly.length < 2) return 0;
+  const points = poly;
+  const edges = [
+    [points[0], points[1]],
+    [points[1], points[2]],
+    [points[2], points[3]],
+    [points[3], points[0]],
+  ];
+  let maxLen = -1;
+  let angleDeg = 0;
+  for (const [a, b] of edges as any[]) {
+    const dx = (b?.x ?? 0) - (a?.x ?? 0);
+    const dy = (b?.y ?? 0) - (a?.y ?? 0);
+    const len = Math.hypot(dx, dy);
+    if (len > maxLen) {
+      maxLen = len;
+      angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    }
+  }
+  if (angleDeg < 10 && angleDeg > -10) return 0;
+
+  return angleDeg;
+}
+
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
 async function inpaintImage(image: { data: Buffer; id: string }, mask: { data: Buffer; id: string }) {
   const imageUrl = await putImageToS3(image.data, "image/jpeg", ["imageTest", image.id]);
-  console.log({ imageUrl });
+
   const maskUrl = await putImageToS3(mask.data, "image/jpeg", ["imageTest", mask.id]);
-  console.log({ maskUrl });
+
   const replicate = new Replicate();
   const output = (await replicate.run(
     "zylim0702/remove-object:0e3a841c913f597c1e4c321560aa69e2bc1f15c65f8c366caafc379240efd8ba",

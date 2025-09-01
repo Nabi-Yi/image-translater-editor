@@ -7,7 +7,7 @@ export type EditorImage = {
   height?: number;
 };
 
-export type BoundingBox = { x: number; y: number; width: number; height: number };
+export type BoundingBox = { x: number; y: number; width: number; height: number; angle?: number };
 
 export type TextItem = {
   id: string;
